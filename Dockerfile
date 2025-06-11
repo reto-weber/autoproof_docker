@@ -12,7 +12,7 @@ ENV Z3_URL=https://github.com/Z3Prover/z3/releases/download/z3-4.8.8/z3-4.8.8-x6
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    wget \§§§§
+    wget \
     tar \
     bzip2 \
     git \
