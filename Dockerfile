@@ -1,5 +1,8 @@
-# Use Ubuntu as the base image
-FROM mcr.microsoft.com/dotnet/sdk:9.0
+#################################
+# Image that compiles autoproof #
+#################################
+# Dotnet images from microsoft are the easiest way to have dotnet installed
+FROM mcr.microsoft.com/dotnet/sdk:6.0.428-1-jammy-amd64 AS build
 # Set environment variables
 ENV DOWNLOAD_URL=https://www.eiffel.com/cdn/EiffelStudio/24.05/107822/Eiffel_24.05_rev_107822-linux-x86-64.tar.bz2
 ENV ESTUDIO_FOLDER=Eiffel_24.05
@@ -9,11 +12,11 @@ ENV Z3_URL=https://github.com/Z3Prover/z3/releases/download/z3-4.8.8/z3-4.8.8-x6
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    wget \
+    wget \§§§§
     tar \
     bzip2 \
     git \
-    libgtk-3-dev \
+    libgtk-3-dev \ 
     unzip \
     python3 \
     sudo
@@ -36,7 +39,8 @@ RUN git clone https://github.com/boogie-org/boogie.git
 WORKDIR /boogie
 RUN    git checkout v2.11.1
 RUN dotnet build Source/Boogie.sln
-WORKDIR $ISE_EIFFEL/studio/tools/boogie 
+# WORKDIR implicitly creates the directory too
+WORKDIR $ISE_EIFFEL/studio/tools/boogie
 WORKDIR $ISE_EIFFEL/studio/tools/autoproof
 
 
@@ -50,36 +54,41 @@ RUN mv $ISE_EIFFEL/studio/tools/boogie/BoogieDriver $ISE_EIFFEL/studio/tools/boo
 WORKDIR /
 RUN wget --no-verbose -O z3.zip $Z3_URL && \
     unzip z3.zip && \
-    mv $(find ./z3* -name bin -type d) /usr/local/bin && \
+    mv $(find ./z3* -name bin -type d) /usr/local && \
     rm z3.zip
 
 # Compile C code
 WORKDIR /research
-RUN ls -al $EIFFEL_SRC/C
 RUN bash compile_c.sh
 
 # Build EVE
 ENV ISE_LIBRARY=$EIFFEL_SRC
-RUN echo 1
-RUN ec -config $EXT/autoproof/autoproof-tty.ecf -freeze -c_compile -batch -target batch
+RUN ec -config $EXT/autoproof/autoproof-tty.ecf -finalize -c_compile -batch -target batch
 
-RUN ls -al /research/EIFGENs/batch/W_code/
-ENV AP_EXE=$AP/EIFGENs/batch/W_code/apb
+#############################
+# Image that runs autoproof #
+#############################
 
-# Precompile test precompiles
-WORKDIR $AP/target/batch/test/precomp
+FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy
+ENV ESTUDIO_FOLDER=Eiffel_24.05
+ENV ISE_PLATFORM=linux-x86-64
+ENV ISE_EIFFEL=/$ESTUDIO_FOLDER
+ENV PATH=$PATH:$ISE_EIFFEL/studio/spec/$ISE_PLATFORM/bin
 
-RUN echo $AP_EXE
-RUN echo $AP
-RUN pwd
-RUN $AP_EXE -config test_precomp.ecf -precompile -c_compile && \
-    $AP_EXE -config test_precomp-safe.ecf -precompile -c_compile
+RUN apt update && apt install -y \
+    libgtk-3-dev \
+    build-essential
 
-# Set working directory for running tests
-WORKDIR /tests
+# Add binaries
+COPY --from=build /research/EIFGENs/batch/F_code/apb /bin/apb
+COPY --from=build $ISE_EIFFEL/studio/spec/$ISE_PLATFORM/bin /bin
+COPY --from=build /usr/local/bin/z3 /usr/local/bin/z3
+# Add eiffel studio
+COPY --from=build /$ISE_EIFFEL /$ISE_EIFFEL
+# Add libraries
+COPY --from=build /Src/library /library
+COPY --from=build /research/extension/autoproof/library /library
 
-# Copy test files (you'll need to provide these)
-COPY . .
+# $AP_EXE -config project.ecf -batch -c_compile -autoproof LINEAR_SEARCH
 
-# Command to run tests (customize as needed)
-CMD ["ec", "-config", "$EXT/autoproof/autoproof-tty.ecf", "-target", "batch", "-batch", "-tests"]
+# /bin/apb -config /Test_project/project.ecf -batch -c_compile -autoproof
